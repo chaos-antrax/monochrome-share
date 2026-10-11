@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="1-to-1 Private screen sharing">
+  <title>Monochrome - Share</title>
+  <link rel="icon" href="/logo.png" type="image/png">
+  <link rel="stylesheet" href="/viewer.css">
+  <script type="module" src="/viewer.js"></script>
+</head>
+<body>
+  <main id="stage" aria-label="Monochrome - Share viewer">
+    <video id="screen" autoplay playsinline muted aria-label="Shared desktop"></video>
+    <div id="overlay">
+      <img class="brand-logo" src="/logo.png" alt="" width="72" height="72">
+      <h1>Monochrome - Share</h1>
+      <p class="tagline">1-to-1 Private screen sharing</p>
+      <p id="message">Open the private link from your host, then tap to start watching.</p>
+      <form id="access" hidden>
+        <label for="token">Access token</label>
+        <input id="token" type="password" autocomplete="off" placeholder="Token from the host console" minlength="16" required>
+      </form>
+      <button id="watch" type="button">Tap to watch</button>
+      <p class="hint">One desktop. One viewer. Live only.</p>
+    </div>
+    <div id="controls" class="controls" role="group" aria-label="Playback controls">
+      <img class="control-logo" src="/logo.png" alt="Monochrome - Share" width="28" height="28">
+      <div class="audio">
+        <button id="mute" class="icon-button" type="button" aria-label="Unmute audio" aria-pressed="true" title="Unmute audio">
+          <svg class="sound-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></svg>
+          <svg class="sound-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 9 5 6m0-6-5 6"/></svg>
+        </button>
+        <label class="sr-only" for="volume">Volume</label>
+        <input id="volume" type="range" min="0" max="1" step="0.05" value="1">
+      </div>
+      <div class="connection" title="Ready to connect"><span class="status-dot" aria-hidden="true"></span><span id="status" role="status" aria-live="polite">Ready to connect</span></div>
+      <details id="stream-details" class="stream-details">
+        <summary class="icon-button" aria-label="Stream information" title="Stream information"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.01"/></svg></summary>
+        <div class="stats-panel"><span>Stream information</span><output id="stats" aria-label="Stream statistics">Waiting for stream</output></div>
+      </details>
+      <button id="fullscreen" class="icon-button" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">
+        <svg class="expand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>
+        <svg class="collapse-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h5V3m13 5h-5V3M8 21v-5H3m13 5v-5h5"/></svg>
+      </button>
+    </div>
+  </main>
+</body>
+</html>

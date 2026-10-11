@@ -1,0 +1,34 @@
+[package]
+name = "monochrome-capture"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Personal Windows desktop streaming over WebRTC"
+publish = false
+default-run = "monochrome-capture"
+
+[features]
+default = []
+media = ["dep:gstreamer", "dep:gstreamer-sdp", "dep:gstreamer-webrtc", "dep:gstreamer-video"]
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+clap = { version = "4", features = ["derive", "env"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+percent-encoding = "2"
+gstreamer = { version = "0.25", features = ["v1_26"], optional = true }
+gstreamer-sdp = { version = "0.25", features = ["v1_26"], optional = true }
+gstreamer-webrtc = { version = "0.25", features = ["v1_26"], optional = true }
+gstreamer-video = { version = "0.25", features = ["v1_26"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_LibraryLoader", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_Security_Credentials", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_HiDpi", "Win32_UI_Accessibility"] }
+
