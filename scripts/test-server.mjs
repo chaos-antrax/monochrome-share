@@ -8,7 +8,8 @@ import { request } from 'node:http';
 const executable = process.env.SCREEN_SHARE_TEST_HOST || fileURLToPath(new URL('../target/debug/monochrome-capture.exe', import.meta.url));
 const token = 'integration-test-token-0123456789';
 const providerSecret = 'long-lived-provider-secret-for-local-test';
-const child = spawn(executable, ['--desktop-child', '--viewer-only', '--bind', '127.0.0.1:0'], {
+const remotePreview = process.env.SCREEN_SHARE_TEST_REMOTE === '1';
+const child = spawn(executable, ['--desktop-child', '--viewer-only', '--bind', '127.0.0.1:0', ...(remotePreview ? ['--remote'] : [])], {
   windowsHide: true,
   env: { ...process.env, SCREEN_SHARE_TOKEN: token, SCREEN_SHARE_TURN_KEY_ID: 'test-key', SCREEN_SHARE_TURN_API_TOKEN: providerSecret },
   stdio: ['pipe', 'pipe', 'pipe'],
@@ -28,7 +29,8 @@ try {
       if (match) { clearTimeout(timeout); resolve(match[1]); }
     });
   });
-  for (const [path, contentType] of [['/', 'text/html'], ['/viewer.js', 'text/javascript'], ['/viewer.css', 'text/css']]) {
+  const previewBase = remotePreview ? base.replace('http:', 'https:') : base;
+  for (const [path, contentType] of [['/', 'text/html'], ['/viewer.js', 'text/javascript'], ['/connection.js', 'text/javascript'], ['/viewer.css', 'text/css']]) {
     const response = await fetch(base + path);
     assert.equal(response.status, 200);
     assert.ok(response.headers.get('content-type').startsWith(contentType));
@@ -45,9 +47,28 @@ try {
   assert.equal(logo.headers.get('content-type'), 'image/png');
   assert.equal(logo.headers.get('cache-control'), 'no-store');
   assert.deepEqual([...new Uint8Array(await logo.arrayBuffer()).slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  const preview = await fetch(base + '/link-preview-inverted-v1.png');
+  assert.equal(preview.status, 200);
+  assert.equal(preview.headers.get('content-type'), 'image/png');
+  const previewBytes = new Uint8Array(await preview.arrayBuffer());
+  assert.deepEqual([...previewBytes.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  const pngHeader = new DataView(previewBytes.buffer, previewBytes.byteOffset, previewBytes.byteLength);
+  assert.equal(pngHeader.getUint32(16), 512);
+  assert.equal(pngHeader.getUint32(20), 512);
   const html = await (await fetch(base + '/')).text();
   assert.ok(html.includes('<title>Monochrome - Share</title>'));
   assert.ok(html.includes('1-to-1 Private screen sharing'));
+  assert.ok(html.includes(`<meta property="og:image" content="${previewBase}/link-preview-inverted-v1.png">`));
+  assert.ok(html.includes('<link rel="icon" href="/logo.png"'));
+  assert.ok(html.includes('class="brand-logo" src="/logo.png"'), 'Viewer artwork must not be inverted');
+  assert.ok(!html.includes('__LINK_PREVIEW_IMAGE__'));
+  assert.ok(!html.includes('property="og:url"'), 'Do not replace the token-bearing shared link with a canonical root URL');
+  const queryHtml = await (await fetch(base + '/?token=' + token)).text();
+  assert.ok(!queryHtml.includes(token), 'Preview metadata must not echo request tokens');
+  const forwardedHtml = await (await fetch(base, { headers: { 'X-Forwarded-Host': 'attacker.example', 'X-Forwarded-Proto': 'https' } })).text();
+  assert.ok(forwardedHtml.includes(`content="${previewBase}/link-preview-inverted-v1.png"`), 'Forwarded headers must not control the preview URL');
+  assert.ok(!/diagnostic|Copy report/i.test(html), 'Temporary diagnostics controls must be removed');
+  assert.equal((await fetch(base + '/diagnostics.js')).status, 404, 'Retired report module must not be served');
   assert.ok(!/<(?:header|footer)[\s>]/i.test(html), 'Viewer must not have framing header/footer bars');
   for (const suffix of ['', '?token=wrong']) {
     const code = await new Promise((resolve, reject) => {

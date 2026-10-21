@@ -105,10 +105,21 @@ pub fn video_chain(config: &Config) -> String {
          video/x-raw(memory:D3D11Memory),framerate=60/1 ! \
          d3d11convert ! video/x-raw(memory:D3D11Memory),format=NV12,width=1920,height=1080 ! \
          queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 leaky=downstream ! \
-         nvd3d11h264enc name=encoder bitrate={} rc-mode=cbr preset=p4 tune=ultra-low-latency \
-         bframes=0 rc-lookahead=0 zerolatency=true gop-size=300 repeat-sequence-header=true ! \
-         video/x-h264,profile=main ! h264parse config-interval=-1",
-        config.monitor, config.adapter, config.bitrate_kbps
+         {}",
+        config.monitor,
+        config.adapter,
+        encoder_chain(config)
+    )
+}
+
+/// Set the real NVENC output profile through downstream caps, not SDP rewriting.
+/// Safari advertises constrained-baseline but can reject an offer of Main alone.
+pub fn encoder_chain(config: &Config) -> String {
+    format!(
+        "nvd3d11h264enc name=encoder bitrate={} rc-mode=cbr preset=p4 tune=ultra-low-latency \
+         cabac=false bframes=0 rc-lookahead=0 zerolatency=true gop-size=300 repeat-sequence-header=true ! \
+         video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1",
+        config.bitrate_kbps
     )
 }
 
@@ -149,6 +160,22 @@ mod tests {
     fn audio_off_removes_the_audio_capture_branch() {
         let config = Config::parse_from(["host", "--audio", "off"]);
         assert!(!pipeline_description(&config).contains("wasapi2src"));
+    }
+
+    #[test]
+    fn safari_profile_is_encoded_without_relabeling_or_reducing_resolution() {
+        let config = Config::parse_from(["host"]);
+        let video = video_chain(&config);
+        assert!(video.contains("profile=constrained-baseline"));
+        assert!(video.contains("cabac=false bframes=0"));
+        assert!(video.contains("video/x-raw(memory:D3D11Memory),framerate=60/1"));
+        assert!(video.contains("format=NV12,width=1920,height=1080"));
+        assert!(!video.contains("profile=main"));
+        let pipeline = pipeline_description(&config);
+        assert!(pipeline.contains("wasapi2src"));
+        assert!(pipeline.contains("encoding-name=OPUS"));
+        assert!(pipeline.contains("encoding-name=H264"));
+        assert!(!pipeline.contains("profile-level-id="));
     }
 
     #[test]

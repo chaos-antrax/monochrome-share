@@ -18,8 +18,8 @@ $arguments = @(
     '!', 'd3d11convert', '!', 'video/x-raw(memory:D3D11Memory),format=NV12,width=1920,height=1080',
     '!', 'queue', 'max-size-buffers=2', 'max-size-bytes=0', 'max-size-time=0', 'leaky=downstream',
     '!', 'nvd3d11h264enc', "bitrate=$BitrateKbps", 'rc-mode=cbr', 'preset=p4', 'tune=ultra-low-latency',
-    'bframes=0', 'rc-lookahead=0', 'zerolatency=true', 'gop-size=300', 'repeat-sequence-header=true',
-    '!', 'video/x-h264,profile=main', '!', 'h264parse', '!', 'fakesink', 'sync=false'
+    'cabac=false', 'bframes=0', 'rc-lookahead=0', 'zerolatency=true', 'gop-size=300', 'repeat-sequence-header=true',
+    '!', 'video/x-h264,profile=constrained-baseline', '!', 'h264parse', '!', 'fakesink', 'sync=false'
 )
 Write-Host "Running a $Seconds-second 1080p60 NVENC spike (no recording)."
 & gst-launch-1.0 @arguments

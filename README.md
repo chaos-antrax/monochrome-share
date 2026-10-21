@@ -67,7 +67,7 @@ Installer builds require Inno Setup. Remote sharing requires `cloudflared`; see 
 
 ## More information
 
-Local playback and public-link sharing have been reported working on multiple Android browsers. Broader device, long-session, and fresh-machine installation testing remain pending.
+Video and audio playback have been reported working on Android and iOS; public-link sharing has also been reported working. Broader device, long-session, and fresh-machine installation testing remain pending.
 
 - [Remote-sharing setup](docs/remote-sharing.md)
 - [Implementation notes](docs/implementation.md)

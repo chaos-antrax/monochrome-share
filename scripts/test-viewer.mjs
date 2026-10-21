@@ -79,12 +79,17 @@ try {
         overlayBottom: overlay.bottom, controlsInStage: document.querySelector('#stage').contains(document.querySelector('#controls')) };
     })()`);
     assert.equal(layout.title, 'Monochrome - Share');
+    const branding = await evaluate(`({ favicon: document.querySelector('link[rel="icon"]').getAttribute('href'), logo: document.querySelector('.brand-logo').getAttribute('src'), preview: document.querySelector('meta[property="og:image"]').content })`);
+    assert.equal(branding.favicon, '/logo.png');
+    assert.equal(branding.logo, '/logo.png');
+    assert.equal(branding.preview, base + '/link-preview-inverted-v1.png');
     assert.ok(layout.logo > 0);
     assert.equal(layout.fullscreenText, '');
     assert.equal(layout.bars, 0);
     assert.ok(layout.controlsInStage);
     assert.ok(layout.dockLeft >= 0 && layout.dockRight <= layout.width, `${name}: controls overflow`);
     assert.ok(layout.overlayBottom <= layout.dockTop, `${name}: overlay overlaps controls`);
+    assert.equal(await evaluate(`document.querySelectorAll('[id^="diagnostics"]').length`), 0, 'Temporary diagnostics UI must be absent');
     if (name === 'desktop' || name === 'mobile') {
       const screenshot = await page('Page.captureScreenshot', { format: 'png' });
       writeFileSync(resolve(output, `viewer-${name}-preview.png`), Buffer.from(screenshot.data, 'base64'));
@@ -114,7 +119,7 @@ try {
   await evaluate(`document.querySelector('#stream-details').open = true`);
   await evaluate(`new Promise(resolve => setTimeout(resolve, 3800))`);
   assert.equal(await evaluate(`document.querySelector('#controls').classList.contains('is-hidden')`), false);
-  console.log('PASS: viewer branding, four responsive sizes, icon-only fullscreen, volume/mute, fullscreen labels, auto-hide and reveal');
+  console.log('PASS: viewer branding, four responsive sizes, no diagnostics UI, icon-only fullscreen, volume/mute, fullscreen labels, auto-hide and reveal');
 } finally {
   if (ws) ws.close();
   if (browser) browser.kill();

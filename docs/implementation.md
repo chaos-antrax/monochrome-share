@@ -49,7 +49,7 @@ Security starts in the first slice: random token unless explicitly configured, l
 - GStreamer `wasapi2src` documents process-tree include/exclude support from 1.22, with Windows build 20348 required. Most Windows 10 desktop installations do not meet that build requirement. Future CLI selection must test the actual build, resolve process trees, and report fallback explicitly.
 - This first audio branch shares one GStreamer clock with video, but explicit silence injection, native QPC timestamps, endpoint change recovery, and restart-aware process selection remain Phase 3 work. Do not infer the 80ms sync target from using one pipeline.
 - The source requests 60fps directly rather than capturing 165fps and dropping every Nth frame. Verify static refresh and even source pacing experimentally before considering Phase 2 complete.
-- Main-profile H.264, no B-frames/lookahead, low-latency CBR, repeated headers, five-second safety GOP, and upstream force-key-unit events are the initial encoder settings. Confirm Safari negotiation and actual PLI/FIR behavior on hardware.
+- Constrained-baseline H.264, CABAC disabled, no B-frames/lookahead, low-latency CBR, repeated headers, five-second safety GOP, and upstream force-key-unit events are the current encoder settings. Main was replaced after the iPad report showed video rejection. Confirm Safari playback and actual PLI/FIR behavior on hardware.
 - The viewer requests a 30ms jitter-buffer target only when supported. It is a browser hint, not a latency guarantee. Fullscreen and wake lock are optional capabilities; mobile OS limitations still apply.
 - Do not deploy coturn, change firewall policy, install Tailscale, or add startup tasks just to compile the initial prototype. Those belong to explicit deployment and later validation.
 
@@ -61,6 +61,24 @@ Security starts in the first slice: random token unless explicitly configured, l
 4. Implement and validate silence continuity and device-change recovery before per-app audio.
 5. Add executable-name process selection, restart tracking, and explicit unsupported-build fallback.
 6. Verify external network/Tailscale routing and two-hour stability before v1 completion.
+
+## Viewer compatibility and startup safeguards
+
+The temporary viewer diagnostics panel, copy-report tools, user-agent/capability collection, and verbose timeline have been removed after the user confirmed video/audio playback on Android and iOS. The desktop app's separate host/tunnel diagnostics are unchanged.
+
+The iPad report showed Main-profile video (`4d402a`) rejected with no video codecs in the answer, while ICE/DTLS never connected. The encoder now uses constrained-baseline caps and disables CABAC; no SDP profile rewriting or resolution/frame-rate reduction is used. The shared encoder chain is exercised by an opt-in synthetic GPU test, which locally produced 1920x1080@60 constrained-baseline and RTP `profile-level-id=42c02a`, packetization mode 1.
+
+Small shared helpers in `viewer/connection.js` retain BUNDLE-aware answer validation, current receiver-health statistics, and startup error classification without storing raw SDP, browser fingerprints, or report history. A zero-port `bundle-only` section inside a BUNDLE group is not treated as rejected. A genuinely rejected/disabled video answer or one with no codec stops immediately with an actionable error.
+
+Startup keeps a 45-second deadline per attempt, including after an SDP answer. Audio-only playback does not cancel the video deadline. A blocked session with received video can remain connected for a second user gesture; other startup timeouts stop the attempt and show an error. Existing bounded reconnects, mute/volume, fullscreen, and normal stream information are preserved. Browser statistics support both `kind` and the older `mediaType` field; missing decoded-frame counters are not treated as zero. Only recognized browser exception names, not potentially sensitive raw messages, appear in connection errors.
+
+See [viewer troubleshooting](viewer-troubleshooting.md) and `scripts/test-viewer-connection.mjs`. Broader device/network coverage, long-session performance, and glass-to-glass latency remain acceptance work.
+
+## Link-preview branding
+
+The viewer advertises a separate 512x512 PNG through Open Graph image metadata: an RGB-inverted version of the original bird composited onto opaque white. The original `logo.png`, browser favicon, desktop icons, installer artwork, and visible viewer logo are unchanged. `scripts/Build-LinkPreview.ps1` regenerates the checked-in `viewer/link-preview-inverted-v1.png` when the brand source changes; `scripts/Test-LinkPreview.ps1` checks reproducibility, inversion, dimensions, and preservation of the original.
+
+The host embeds the derivative and serves it at `/link-preview-inverted-v1.png`. Crawler-facing HTML uses an absolute asset URL constructed from a validated request Host authority and the application's configured mode (HTTPS for public sharing, HTTP for LAN). Forwarded headers do not control it. Metadata excludes request queries and access tokens; no canonical `og:url` is emitted to replace the original fragment-bearing sharing link. Crawlers fetch only the public page/artwork and do not consume a viewer session. Actual WhatsApp preview selection remains an external-client check; test a fresh sharing link after updating.
 
 ## Primary references consulted
 

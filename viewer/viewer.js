@@ -1,3 +1,5 @@
+import { acceptsVideo, summarizeStats, startupDiagnosis, browserErrorName } from './connection.js';
+
 const video = document.querySelector('#screen');
 const status = document.querySelector('#status');
 const message = document.querySelector('#message');
@@ -36,10 +38,30 @@ let token = new URLSearchParams(location.hash.slice(1)).get('token') || '';
 // Keep the secret in memory, out of referrers and the visible address bar.
 if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 access.hidden = Boolean(token);
-let pc, socket, retryTimer, statsTimer, wakeLock, disconnectTimer;
+let pc, socket, retryTimer, statsTimer, wakeLock, disconnectTimer, startupTimer;
 let generation = 0, attempts = 0, started = false, stopped = false;
-let lastSample;
+let lastSample, startupState;
+const STARTUP_TIMEOUT_MS = 45000;
 
+function startupSucceeded() {
+  // Audio alone can fire playing; only video can cancel the video-start deadline.
+  if (video.videoWidth > 0 && !video.paused) {
+    clearTimeout(startupTimer);
+    if (startupState) startupState.videoStarted = true;
+    return true;
+  }
+  return false;
+}
+function initializationFailed(error) {
+  fail(`Unable to initialize the viewer (${browserErrorName(error)}). Reload the page and try again.`);
+}
+function playbackBlocked() {
+  if (startupState) startupState.playbackBlocked = true;
+  overlay.hidden = false;
+  watch.disabled = false;
+  watch.textContent = 'Tap to play ↗';
+  setStatus('Tap to play', 'Your browser needs another tap to start playback with sound.');
+}
 function audioLabel() {
   const silent = video.muted || video.volume === 0;
   const label = silent ? 'Unmute audio' : 'Mute audio';
@@ -62,6 +84,7 @@ function dispose() {
   stage.classList.remove('is-live');
   clearInterval(statsTimer);
   clearTimeout(disconnectTimer);
+  clearTimeout(startupTimer);
   if (socket) { socket.onclose = null; socket.close(); socket = null; }
   if (pc) { pc.onconnectionstatechange = null; pc.close(); pc = null; }
   video.srcObject = null;
@@ -82,7 +105,7 @@ function retry(detail = 'Connection interrupted. Reconnecting automatically…')
   if (attempts >= 5) {
     token = '';
     access.hidden = false;
-    fail('Unable to reach the host. Check its address and paste the current access token to try again.');
+    fail(`Unable to connect after several attempts. ${detail} Check the host and paste the current access token to try again.`);
     return;
   }
   generation += 1;
@@ -94,7 +117,7 @@ function retry(detail = 'Connection interrupted. Reconnecting automatically…')
   const delay = Math.min(15000, 1000 * 2 ** Math.min(attempts++, 4)) + Math.random() * 300;
   retryTimer = setTimeout(() => {
     retryTimer = null;
-    connect().catch(() => fail('Unable to initialize the viewer. Reload this page and try again.'));
+    connect().catch(initializationFailed);
   }, delay);
 }
 function fail(detail) {
@@ -114,19 +137,38 @@ async function connect() {
   generation += 1;
   const current = generation;
   dispose();
-  if (!window.RTCPeerConnection) { fail('This browser does not support WebRTC. Use Android Chrome or iPad Safari.'); return; }
+  if (!window.RTCPeerConnection) { fail('This browser does not support WebRTC. Use an updated browser.'); return; }
   stopped = false;
   watch.disabled = true;
   setStatus('Connecting', 'Establishing your private stream…');
+  // Only the current connection's health is retained. No SDP, timeline, or reports.
+  const state = startupState = { step: 'creating the connection', websocket: 'connecting',
+    answerSent: false, videoStarted: false, playbackBlocked: false, media: summarizeStats(new Map()) };
   const peer = pc = new RTCPeerConnection({ iceServers: [] });
+  startupTimer = setTimeout(() => {
+    if (current !== generation || state.videoStarted || startupSucceeded()) return;
+    state.connection = peer.connectionState;
+    state.ice = peer.iceConnectionState;
+    const diagnosis = startupDiagnosis(state);
+    if (state.playbackBlocked && state.media.video.bytes > 0 &&
+        state.media.video.framesDecoded !== 0 && peer.connectionState === 'connected') {
+      // Preserve a valid media connection for another user gesture.
+      playbackBlocked();
+    } else fail(`Startup timed out after 45 seconds. ${diagnosis}`);
+  }, STARTUP_TIMEOUT_MS);
   const stream = new MediaStream();
   video.srcObject = stream;
-  // Called from the user's tap on the initial connection.
-  video.play().catch(() => {});
+  // Prime playback within the user's initial tap; tracks arrive asynchronously.
+  video.play().catch(() => { if (current === generation) state.playbackBlocked = true; });
   const url = new URL('/ws', location.href);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('token', token);
   const ws = socket = new WebSocket(url);
+  ws.onopen = () => {
+    if (current !== generation) return;
+    state.websocket = 'open';
+    state.step = 'waiting for the host offer';
+  };
   let pendingIce = [], signalQueue = Promise.resolve();
   peer.onicecandidate = ({ candidate }) => {
     if (current !== generation || !candidate) return;
@@ -138,13 +180,7 @@ async function connect() {
     if ('jitterBufferTarget' in receiver) {
       try { receiver.jitterBufferTarget = 30; } catch { /* Browser-specific hint. */ }
     }
-    video.play().catch(() => {
-      if (current !== generation) return;
-      overlay.hidden = false;
-      watch.disabled = false;
-      watch.textContent = 'Tap to play ↗';
-      setStatus('Tap to play', 'Your browser needs another tap to start playback with sound.');
-    });
+    video.play().catch(() => { if (current === generation) playbackBlocked(); });
   };
   peer.onconnectionstatechange = () => {
     if (current !== generation) return;
@@ -160,51 +196,78 @@ async function connect() {
   };
   ws.onmessage = ({ data }) => {
     // SDP must finish before adding ICE. Serialize asynchronous message handling.
+    let operation = 'reading host signaling';
     signalQueue = signalQueue.then(async () => {
       if (current !== generation) return;
       const signal = JSON.parse(data);
       if (signal.type === 'error') { fail(signal.message); return; }
       if (signal.type === 'ice-config') {
+        state.step = operation = 'applying connection settings';
         peer.setConfiguration({ iceServers: signal.ice_servers });
       } else if (signal.type === 'offer') {
+        state.step = operation = 'applying the host offer';
         await peer.setRemoteDescription({ type: 'offer', sdp: signal.sdp });
         if (current !== generation) return;
-        for (const candidate of pendingIce) await peer.addIceCandidate(candidate);
+        state.step = operation = 'applying queued connection candidates';
+        for (const candidate of pendingIce) {
+          await peer.addIceCandidate(candidate);
+          if (current !== generation) return;
+        }
         pendingIce = [];
+        state.step = operation = 'creating the browser answer';
         const answer = await peer.createAnswer();
+        if (current !== generation) return;
+        if (!acceptsVideo(answer.sdp)) {
+          fail('This browser did not accept the video format. Update the browser and host app, then restart sharing.');
+          return;
+        }
+        state.step = operation = 'applying the browser answer';
         await peer.setLocalDescription(answer);
         if (current !== generation) return;
         send({ type: 'answer', sdp: answer.sdp });
+        state.answerSent = true;
+        state.step = 'waiting for media';
       } else if (signal.type === 'ice') {
         const candidate = { candidate: signal.candidate, sdpMLineIndex: signal.sdp_mline_index };
-        if (peer.remoteDescription) await peer.addIceCandidate(candidate);
-        else pendingIce.push(candidate);
+        if (peer.remoteDescription) {
+          operation = 'applying a connection candidate';
+          await peer.addIceCandidate(candidate);
+        } else pendingIce.push(candidate);
       }
-    }).catch(() => { if (current === generation) retry('Stream negotiation failed. Retrying…'); });
+    }).catch(error => {
+      if (current !== generation) return;
+      retry(`Stream negotiation failed while ${operation} (${browserErrorName(error)}). Reconnecting…`);
+    });
   };
-  ws.onclose = () => { if (current === generation) retry('Host unavailable, token rejected, or another viewer is connected. Retrying…'); };
+  ws.onclose = () => {
+    if (current !== generation) return;
+    state.websocket = 'closed';
+    retry('Host unavailable, token rejected, or another viewer is connected. Retrying…');
+  };
   ws.onerror = () => { /* onclose performs the reconnect. */ };
+  let statsPending = false;
   statsTimer = setInterval(async () => {
+    if (statsPending) return;
+    statsPending = true;
     try {
       const reports = await peer.getStats();
       if (current !== generation) return;
-      let videoReport, candidateReport;
+      state.media = summarizeStats(reports);
+      startupSucceeded();
+      let videoReport;
       reports.forEach(report => {
-        if (report.type === 'inbound-rtp' && report.kind === 'video') videoReport = report;
-        if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) candidateReport = report;
+        if (report.type === 'inbound-rtp' && !report.isRemote && (report.kind || report.mediaType) === 'video') videoReport = report;
       });
-      if (!videoReport) return;
+      if (!videoReport) { stats.textContent = 'Waiting for video'; return; }
       const report = videoReport;
       const elapsed = lastSample ? report.timestamp - lastSample.timestamp : 0;
       const mbps = elapsed > 0 ? ((report.bytesReceived - lastSample.bytesReceived) * 8 / elapsed / 1000).toFixed(1) : '—';
       lastSample = report;
       const fps = report.framesPerSecond ?? '—';
-      const rtt = candidateReport?.currentRoundTripTime;
-      const localCandidate = candidateReport ? reports.get(candidateReport.localCandidateId) : undefined;
-      const remoteCandidate = candidateReport ? reports.get(candidateReport.remoteCandidateId) : undefined;
-      const route = localCandidate?.candidateType === 'relay' || remoteCandidate?.candidateType === 'relay' ? 'Relay' : 'Direct';
-      stats.textContent = `${report.frameWidth ?? '—'} × ${report.frameHeight ?? '—'} · ${fps} fps · ${mbps} Mbps · RTT ${rtt === undefined ? '—' : Math.round(rtt * 1000)} ms · ${candidateReport ? route : 'Connecting'}`;
-    } catch { /* Session closed while collecting stats. */ }
+      const rtt = state.media.rttMs ?? '—';
+      stats.textContent = `${report.frameWidth ?? '—'} × ${report.frameHeight ?? '—'} · ${fps} fps · ${mbps} Mbps · RTT ${rtt} ms · ${state.media.route}`;
+    } catch { /* Stats are optional; a closed/unsupported receiver must not break playback. */ }
+    finally { statsPending = false; }
   }, 2000);
 }
 
@@ -218,15 +281,18 @@ watch.addEventListener('click', () => {
   video.muted = false;
   audioLabel();
   if (pc?.connectionState === 'connected') {
-    video.play().catch(() => setStatus('Playback blocked', 'Tap again to allow playback.'));
+    const current = generation;
+    video.play().catch(() => { if (current === generation) playbackBlocked(); });
     send({ type: 'keyframe' });
     return;
   }
   started = true;
   attempts = 0;
-  connect().catch(() => fail('Unable to initialize the viewer. Reload this page and try again.'));
+  connect().catch(initializationFailed);
 });
 video.addEventListener('playing', () => {
+  if (startupState) startupState.playbackBlocked = false;
+  startupSucceeded();
   overlay.hidden = true;
   stage.classList.add('is-live');
   watch.disabled = false;
@@ -260,6 +326,9 @@ document.addEventListener('fullscreenchange', fullscreenLabel);
 video.addEventListener('webkitbeginfullscreen', fullscreenLabel);
 video.addEventListener('webkitendfullscreen', fullscreenLabel);
 video.addEventListener('pause', showControls);
+video.addEventListener('error', () => {
+  if (started && !stopped) fail('The browser could not play this stream. Update the browser and restart sharing.');
+});
 stage.addEventListener('pointermove', showControls);
 stage.addEventListener('pointerdown', showControls);
 controls.addEventListener('focusin', showControls);
@@ -273,7 +342,8 @@ document.addEventListener('visibilitychange', () => {
   if (pc?.connectionState === 'connected') {
     send({ type: 'keyframe' });
     keepAwake();
-    video.play().catch(() => { overlay.hidden = false; watch.disabled = false; watch.textContent = 'Tap to play ↗'; });
+    const current = generation;
+    video.play().catch(() => { if (current === generation) playbackBlocked(); });
   } else retry();
 });
 window.addEventListener('online', () => { if (started && !stopped && pc?.connectionState !== 'connected') retry(); });

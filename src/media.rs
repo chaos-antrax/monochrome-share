@@ -231,6 +231,72 @@ impl Drop for MediaSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[test]
+    #[ignore = "Requires a Windows NVIDIA GPU and GStreamer; uses synthetic frames, never desktop capture"]
+    fn nvenc_outputs_real_constrained_baseline_and_matching_rtp_caps() {
+        gst::init().unwrap();
+        let config = Config::parse_from(["host"]);
+        let description = format!(
+            "videotestsrc num-buffers=60 pattern=black ! \
+             video/x-raw,format=NV12,width=1920,height=1080,framerate=60/1 ! \
+             d3d11upload ! video/x-raw(memory:D3D11Memory) ! \
+             {} ! rtph264pay name=profile_pay pt=96 config-interval=-1 aggregate-mode=zero-latency ! \
+             application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000 ! fakesink sync=false",
+            crate::config::encoder_chain(&config)
+        );
+        let pipeline = gst::parse::launch(&description)
+            .unwrap()
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        let result = (|| -> Result<()> {
+            pipeline.set_state(gst::State::Playing)?;
+            let bus = pipeline.bus().context("Missing test bus")?;
+            let message = bus
+                .timed_pop_filtered(
+                    gst::ClockTime::from_seconds(30),
+                    &[gst::MessageType::Eos, gst::MessageType::Error],
+                )
+                .context("Synthetic NVENC test timed out")?;
+            if let gst::MessageView::Error(error) = message.view() {
+                anyhow::bail!("NVENC test failed: {} ({:?})", error.error(), error.debug());
+            }
+            let encoded = pipeline
+                .by_name("encoder")
+                .unwrap()
+                .static_pad("src")
+                .unwrap()
+                .current_caps()
+                .context("Encoder produced no caps")?;
+            let caps = encoded.structure(0).unwrap();
+            anyhow::ensure!(caps.get::<String>("profile")? == "constrained-baseline");
+            anyhow::ensure!(caps.get::<i32>("width")? == 1920);
+            anyhow::ensure!(caps.get::<i32>("height")? == 1080);
+            anyhow::ensure!(caps.get::<gst::Fraction>("framerate")? == gst::Fraction::new(60, 1));
+            let rtp = pipeline
+                .by_name("profile_pay")
+                .unwrap()
+                .static_pad("src")
+                .unwrap()
+                .current_caps()
+                .context("Payloader produced no caps")?;
+            let rtp_caps = rtp.structure(0).unwrap();
+            let profile = rtp_caps.get::<String>("profile-level-id")?;
+            // RFC 6184 constrained-baseline: profile_idc=0x42, constraint_set1=1.
+            anyhow::ensure!(profile.len() == 6 && profile.starts_with("42"));
+            anyhow::ensure!(u8::from_str_radix(&profile[2..4], 16)? & 0x40 != 0);
+            anyhow::ensure!(rtp_caps.get::<String>("packetization-mode")? == "1");
+            println!(
+                "PASS: synthetic NVENC 1920x1080@60 constrained-baseline; RTP profile-level-id={profile}, packetization-mode=1"
+            );
+            Ok(())
+        })();
+        // Stop GPU work even if a caps assertion or encoder operation failed.
+        let stopped = pipeline.set_state(gst::State::Null);
+        result.unwrap();
+        stopped.unwrap();
+    }
 
     #[test]
     fn gstreamer_accepts_browser_turn_urls_with_escaped_credentials() {

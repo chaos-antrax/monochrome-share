@@ -4,7 +4,7 @@ use axum::{
         Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header, uri::Authority},
     response::{Html, IntoResponse, Response},
     routing::get,
 };
@@ -78,10 +78,12 @@ async fn main() -> anyhow::Result<()> {
         ice_provider: IceProvider::new()?,
     };
     let app = Router::new()
-        .route("/", get(|| async { Html(include_str!("../viewer/index.html")) }))
+        .route("/", get(viewer_page))
         .route("/viewer.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("../viewer/viewer.js")) }))
         .route("/viewer.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], include_str!("../viewer/viewer.css")) }))
         .route("/logo.png", get(|| async { ([(header::CONTENT_TYPE, "image/png")], include_bytes!("../logo.png").as_slice()) }))
+        .route("/link-preview-inverted-v1.png", get(|| async { ([(header::CONTENT_TYPE, "image/png")], include_bytes!("../viewer/link-preview-inverted-v1.png").as_slice()) }))
+        .route("/connection.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("../viewer/connection.js")) }))
         .route("/health", get(|| async { "ok" }))
         .route("/ws", get(upgrade))
         .layer(axum::middleware::from_fn(|request, next: axum::middleware::Next| async move {
@@ -104,6 +106,47 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
     Ok(())
+}
+
+fn preview_image_url(headers: &HeaderMap, remote: bool) -> Option<String> {
+    // The public-sharing mode uses HTTPS at the tunnel; LAN hosting uses HTTP.
+    // Use the requested authority, not untrusted forwarded-host/proto headers.
+    // Only a public asset URL is constructed: no request path/query or token.
+    let authority = headers
+        .get(header::HOST)?
+        .to_str()
+        .ok()?
+        .parse::<Authority>()
+        .ok()?;
+    if authority.as_str().contains('@') {
+        return None;
+    }
+    let scheme = if remote { "https" } else { "http" };
+    Some(format!(
+        "{scheme}://{authority}/link-preview-inverted-v1.png"
+    ))
+}
+
+fn escape_html_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\'', "&#39;")
+}
+
+async fn viewer_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Html<String>, StatusCode> {
+    let image = preview_image_url(&headers, state.config.remote).ok_or(StatusCode::BAD_REQUEST)?;
+    // Do not publish a canonical og:url: shared links must retain their original
+    // token fragment, and no secret belongs in crawler-facing metadata.
+    Ok(Html(include_str!("../viewer/index.html").replace(
+        "__LINK_PREVIEW_IMAGE__",
+        &escape_html_attribute(&image),
+    )))
 }
 
 async fn upgrade(
@@ -264,4 +307,45 @@ async fn session(
     #[cfg(not(feature = "media"))]
     let _ = (&mut shutdown, ice_provider);
     Ok(())
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    #[test]
+    fn preview_uses_authority_and_configured_scheme_without_forwarded_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, "share.example:8000".parse().unwrap());
+        headers.insert("x-forwarded-host", "untrusted.example".parse().unwrap());
+        headers.insert("x-forwarded-proto", "https".parse().unwrap());
+        assert_eq!(
+            preview_image_url(&headers, false).as_deref(),
+            Some("http://share.example:8000/link-preview-inverted-v1.png")
+        );
+        assert_eq!(
+            preview_image_url(&headers, true).as_deref(),
+            Some("https://share.example:8000/link-preview-inverted-v1.png")
+        );
+        headers.insert(header::HOST, "[::1]:8000".parse().unwrap());
+        assert_eq!(
+            preview_image_url(&headers, false).as_deref(),
+            Some("http://[::1]:8000/link-preview-inverted-v1.png")
+        );
+    }
+
+    #[test]
+    fn preview_rejects_invalid_authorities_and_escapes_html() {
+        assert!(preview_image_url(&HeaderMap::new(), false).is_none());
+        for host in [
+            "user:password@example.com",
+            "example.com/path",
+            "example.com?token=secret",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::HOST, host.parse().unwrap());
+            assert!(preview_image_url(&headers, false).is_none());
+        }
+        assert_eq!(escape_html_attribute("&\"<>'"), "&amp;&quot;&lt;&gt;&#39;");
+    }
 }
