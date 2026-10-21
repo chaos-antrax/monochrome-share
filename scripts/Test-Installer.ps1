@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Executable = (Join-Path $PSScriptRoot '..\artifacts\MonochromeCapture-0.1.0-setup.exe'),
+    [string]$Executable = (Join-Path $PSScriptRoot '..\artifacts\MonochromeShare-0.1.1-setup.exe'),
     [ValidatePattern('^[a-f0-9]{8}$')][string]$ShortcutTestId,
     [switch]$CreateShortcut
 )
@@ -81,7 +81,7 @@ $testInstallDirectory = $null
 try {
     if ($ShortcutTestId) {
         $testRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\artifacts\shortcut-test-$ShortcutTestId"))
-        $expectedSetup = Join-Path $testRoot 'MonochromeCapture-0.1.0-setup.exe'
+        $expectedSetup = Join-Path $testRoot 'MonochromeShare-0.1.1-setup.exe'
         if ((Resolve-Path -LiteralPath $Executable).Path -ne $expectedSetup) { throw 'Shortcut installation tests only accept their isolated fixture executable' }
     }
     $logPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\artifacts\installer-preview.log'))

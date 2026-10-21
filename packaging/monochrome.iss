@@ -11,17 +11,22 @@ AppId=MonochromeCapture.ShortcutTest.{#ShortcutTestId}
 DefaultDirName={#OutputDir}\installed
 #else
 AppId={{28585E95-BA2A-46B6-8178-16F8598EF187}
-DefaultDirName={localappdata}\Programs\Monochrome Capture
+DefaultDirName={localappdata}\Programs\Monochrome Share
 #endif
 AppName=Monochrome - Share
-AppVersion=0.1.0
-AppPublisher=Monochrome Capture
+AppVersion=0.1.1
+VersionInfoVersion=0.1.1.0
+VersionInfoProductVersion=0.1.1.0
+VersionInfoTextVersion=0.1.1
+VersionInfoProductTextVersion=0.1.1
+AppPublisher=Monochrome Share
+UsePreviousAppDir=yes
 DefaultGroupName=Monochrome - Share
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
-OutputBaseFilename=MonochromeCapture-0.1.0-setup
+OutputBaseFilename=MonochromeShare-0.1.1-setup
 Compression=lzma2
 SolidCompression=yes
 ; Inno Setup 6.6+ is required for the built-in neutral dark style.

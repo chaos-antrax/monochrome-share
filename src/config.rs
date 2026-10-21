@@ -8,7 +8,11 @@ pub enum AudioMode {
 }
 
 #[derive(Clone, Parser)]
-#[command(version, about = "Private Windows screen sharing to a single browser")]
+#[command(
+    name = "monochrome-share",
+    version,
+    about = "Private Windows screen sharing to a single browser"
+)]
 pub struct Config {
     /// Use a specific Tailscale IP or LAN IP to accept phone connections.
     #[arg(long, default_value = "127.0.0.1:8000")]

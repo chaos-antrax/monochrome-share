@@ -8,5 +8,5 @@ fn main() {
     #[cfg(windows)]
     desktop::run();
     #[cfg(not(windows))]
-    eprintln!("Monochrome Capture desktop runs on Windows.");
+    eprintln!("Monochrome - Share desktop runs on Windows.");
 }

@@ -19,7 +19,7 @@ try {
     $artifacts = Join-Path $projectRoot 'artifacts'
     New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
     # Fresh staging directory; never erase an existing user directory.
-    $stage = Join-Path $artifacts ('MonochromeCapture-0.1.0-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $stage = Join-Path $artifacts ('MonochromeShare-0.1.1-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     & (Join-Path $PSScriptRoot 'Build-BrandAssets.ps1') -OutputDirectory $stage -InstallerImages
     $runtime = Join-Path $stage 'runtime'
     foreach ($relative in @('bin', 'lib\gstreamer-1.0', 'libexec\gstreamer-1.0', 'share')) {
@@ -67,5 +67,5 @@ try {
     }
     & $InnoCompiler '/Qp' "/DSourceDir=$stage" "/DOutputDir=$artifacts" (Join-Path $projectRoot 'packaging\monochrome.iss')
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
-    Write-Host ('Installer: ' + (Join-Path $artifacts 'MonochromeCapture-0.1.0-setup.exe'))
+    Write-Host ('Installer: ' + (Join-Path $artifacts 'MonochromeShare-0.1.1-setup.exe'))
 } finally { Pop-Location }

@@ -14,7 +14,7 @@ foreach ($createShortcut in @($true, $false)) {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'target\release\desktop.exe') -Destination $source
     & $compiler /Q "/DSourceDir=$source" "/DOutputDir=$testRoot" "/DShortcutTestId=$testId" (Join-Path $projectRoot 'packaging\monochrome.iss')
     if ($LASTEXITCODE -ne 0) { throw 'Isolated shortcut installer compilation failed' }
-    $arguments = @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'Test-Installer.ps1'), '-Executable', (Join-Path $testRoot 'MonochromeCapture-0.1.0-setup.exe'), '-ShortcutTestId', $testId)
+    $arguments = @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'Test-Installer.ps1'), '-Executable', (Join-Path $testRoot 'MonochromeShare-0.1.1-setup.exe'), '-ShortcutTestId', $testId)
     if ($createShortcut) { $arguments += '-CreateShortcut' }
     & (Join-Path $PSHOME 'powershell.exe') @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Shortcut installer regression test failed' }
